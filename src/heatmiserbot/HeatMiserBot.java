@@ -66,6 +66,7 @@ public class HeatMiserBot {
         }
         String[] list = args[3].split(",");
         tuyaDeviceID=args[0];
+        tuyaAccessID=args[1];
         tuyaSecret=args[2];
         Socket socket = new Socket(neoStatIP, neoStatPort);
         PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
