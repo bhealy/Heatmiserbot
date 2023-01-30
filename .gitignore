@@ -1,1 +1,11 @@
 /build/
+*.jar
+dist/README.TXT
+dist/.DS_Store
+neohub.csv
+lib/Teams_osx_s_8DB02BA6F21F5F8-3-0_c_w_.pkg
+dist/.DS_Store
+lib/.DS_Store
+.DS_Store
+.DS_Store
+dist/.DS_Store
