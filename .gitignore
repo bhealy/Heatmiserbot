@@ -9,3 +9,5 @@ lib/.DS_Store
 .DS_Store
 .DS_Store
 dist/.DS_Store
+nbproject/private/private.properties
+nbproject/private/private.xml
