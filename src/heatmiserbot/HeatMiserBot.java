@@ -30,6 +30,9 @@ import java.util.Map.Entry;
  */
 public class HeatMiserBot {
 
+        static protected String emailUser; // for SMTP server
+        static protected String emailPassword;
+        
     class DeviceInfoResult {
 
         Boolean AWAY;
@@ -62,82 +65,98 @@ public class HeatMiserBot {
     static String tuyaAccessID;
     static String tuyaSecret;
 
-    public static void main(String[] args) throws IOException {
+    /**
+     * NeoHubu API docs at
+     * https://dev.heatmiser.com/t/api-neohub-v3-0-protocol-8th-june-2022/222
+     *
+     * @param args
+     * @throws IOException
+     */
+    public static void main(String[] args) {
 
-        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss");
-        LocalDateTime now = LocalDateTime.now();
-        String when = dtf.format(now);
-        
-        TuyaSender.log("Starting up.........");
-        if (args.length != 4) {
-            System.out.println("Usage: COMMAND deviceID accessID secret stat1,stat2,statn    ");
-            System.out.println("eg. COMMAND devid accessid secret Esther,Lily  (uses startsWith to natch tokens to actual device names)");
-            System.exit(0);
-        }
-        String[] list = args[3].split(",");
-        tuyaDeviceID = args[0];
-        tuyaAccessID = args[1];
-        tuyaSecret = args[2];
-        Socket socket = new Socket(neoStatIP, neoStatPort);
-        PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-        BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-        Gson g = new Gson();
+    
+        try {
+            DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss");
+            LocalDateTime now = LocalDateTime.now();
+            String when = dtf.format(now);
+            boolean rc = false;
 
-        out.println("{\"GET_ZONES\":0}" + '\0' + '\r');// command to the neoHub to list all stats 
-        String response = in.readLine();
+            TuyaSender.log("Starting up.........");
+            if (args.length != 6) {
+                System.out.println("Usage: COMMAND deviceID accessID secret stat1,stat2,statn    ");
+                System.out.println("eg. COMMAND devid accessid secret Esther,Lily  (uses startsWith to natch tokens to actual device names)");
+                System.exit(0);
+            }
+            String[] list = args[3].split(",");
+            tuyaDeviceID = args[0];
+            tuyaAccessID = args[1];
+            tuyaSecret = args[2];
+            emailUser=args[4];
+            emailPassword=args[5];
+            Socket socket = new Socket(neoStatIP, neoStatPort);
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-        //System.out.println("Response: " + response);
-        Type mapType = new TypeToken<Map<String, Integer>>() {
-        }.getType();
-        Map<String, Integer> r = new Gson().fromJson(response, mapType);
+            out.println("{\"GET_ZONES\":0}" + '\0' + '\r');// command to the neoHub to list all stats 
+            String response = in.readLine();
 
-        boolean allOff = true; // just need one stat to be kooking for juice and we turn pump on
-        boolean bFileExists = new File("neohub.csv").exists();
-        FileWriter writer = new FileWriter("neohub.csv", true);
-        if (!bFileExists) {
-            writer.write("when,device,set temperature,temperature,heating,offline\n");
-        }
+            //System.out.println("Response: " + response);
+            Type mapType = new TypeToken<Map<String, Integer>>() {
+            }.getType();
+            Map<String, Integer> r = new Gson().fromJson(response, mapType);
 
-        for (Entry e : r.entrySet()) {
-            // Send a command to the thermostat
-            in.skip(1);
-            out.println("{\"INFO\":\"" + e.getKey().toString() + "\"}" + '\0' + '\r');
+            boolean allOff = true; // just need one stat to be kooking for juice and we turn pump on
+            boolean bFileExists = new File("neohub.csv").exists();
+            FileWriter writer = new FileWriter("neohub.csv", true);
+            if (!bFileExists) {
+                writer.write("when,device,set temperature,temperature,heating,offline\n");
+            }
 
-            // Read the response from the thermostat
-            response = in.readLine();
-            // System.out.println("Response: " + response);
+            for (Entry e : r.entrySet()) {
+                // Send a command to the thermostat
+                in.skip(1);
+                out.println("{\"INFO\":\"" + e.getKey().toString() + "\"}" + '\0' + '\r');
 
-            // is this a stat of interest
-            InfoResult d = g.fromJson(response, InfoResult.class);
-            String deviceName = d.devices[0].device.toUpperCase();
-            float cst = d.devices[0].CURRENT_SET_TEMPERATURE;
-            float ct = d.devices[0].CURRENT_TEMPERATURE;
-            boolean heating = d.devices[0].HEATING;
-            boolean offline = d.devices[0].OFFLINE;
+                // Read the response from the thermostat
+                response = in.readLine();
+                // System.out.println("Response: " + response);
 
-            writer.write(when+","+deviceName + "," + cst + "," + ct + "," + heating + "," + offline + "\n");
+                // is this a stat of interest
+                InfoResult d = new Gson().fromJson(response, InfoResult.class);
+                String deviceName = d.devices[0].device.toUpperCase();
+                float cst = d.devices[0].CURRENT_SET_TEMPERATURE;
+                float ct = d.devices[0].CURRENT_TEMPERATURE;
+                boolean heating = d.devices[0].HEATING;
+                boolean offline = d.devices[0].OFFLINE;
 
-            for (String s : list) {
+                writer.write(when + "," + deviceName + "," + cst + "," + ct + "," + heating + "," + offline + "\n");
 
-                if (deviceName.toUpperCase().startsWith(s.toUpperCase())) {
-                    // we are interested in this stat
-                    boolean needHeat = ct + 0.5 < cst;
-                    TuyaSender.log("Found stat of interest: " + deviceName + ", at " + ct + ", target=" + cst + (needHeat ? " *** NEED HEAT ***" : "") + (offline ? " *** OFFLINE ***" : ""));
+                for (String s : list) {
 
-                    //allOff=allOff && !d.devices[0].HEATING; -- trust the stats or...
-                    allOff = allOff && !needHeat;
-                    if (!allOff) {
-                        TuyaSender.log("Stat " + deviceName + " calling for heat");
+                    if (deviceName.toUpperCase().startsWith(s.toUpperCase())) {
+                        // we are interested in this stat
+                        boolean needHeat = ct + 0.5 < cst;
+                        TuyaSender.log("Found stat of interest: " + deviceName + ", at " + ct + ", target=" + cst + (needHeat ? " *** NEED HEAT ***" : "") + (offline ? " *** OFFLINE ***" : ""));
+
+                        //allOff=allOff && !d.devices[0].HEATING; -- trust the stats or...
+                        allOff = allOff && !needHeat;
+                        if (!allOff) {
+                            TuyaSender.log("Stat " + deviceName + " calling for heat");
+                        }
+                        break;
                     }
-                    break;
                 }
             }
+            writer.close();
+            socket.close();
+
+            // now set pump based on allOff state - only need one stat to be asking or heat and we run the pump
+            Switch.set(tuyaDeviceID, tuyaAccessID, tuyaSecret, !allOff);
+            rc = true;
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            Email.send(emailUser,emailPassword,"heaatmiserbot problem", e.toString());
         }
-        writer.close();
-        socket.close();
-
-        // now set pump based on allOff state - only need one stat to be asking or heat and we run the pump
-        Switch.set(tuyaDeviceID, tuyaAccessID, tuyaSecret, !allOff);
-
     }
 }
